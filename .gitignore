@@ -1,0 +1,8 @@
+wandb/
+Olympic Boxing Punch Classification Video Dataset/
+facts-boxing-videomae/
+preprocessed_clips/
+__pycache__/
+*.md
+*.zip
+*.mp4

@@ -1,0 +1,11 @@
+numpy
+torch
+av
+transformers
+evaluate
+datasets
+wandb
+scikit-learn
+pillow
+transformers[torch]
+matplotlib
