@@ -15,6 +15,9 @@ from transformers import (
     Trainer,
 )
 import evaluate  # pip install evaluate
+import math
+
+from sklearn.metrics import classification_report
 
 
 # -------------------------
@@ -126,207 +129,67 @@ def uniform_sample_indices(num_total: int, num_target: int) -> np.ndarray:
 # -------------------------
 
 class BoxingDataset(Dataset):
-    """
-    Loads video clips from the Olympic Boxing Punch Classification dataset.
-
-    Dataset structure:
-    - base_dir/
-      - task_kam2_gh078416/
-        - annotations.json  # Contains tracks with labels and frame ranges
-        - data/
-          - GH078416.mp4    # Full video file
-      - task_kam2_gh088416/
-        ...
-
-    Each annotations.json contains tracks where each track represents a punch clip
-    with a label (Polish) and frame range (bounding boxes across frames).
-
-    Supports two modes:
-    1. On-demand loading (use_preprocessed=False): Decodes video clips at runtime (slower, CPU-bound)
-    2. Preprocessed loading (use_preprocessed=True): Loads pre-extracted numpy arrays (faster, GPU-bound)
-    """
-
-    def __init__(
-        self,
-        dataset_dir: str,
-        split: str,
-        image_processor: AutoImageProcessor,
-        train_ratio: float = 0.7,
-        val_ratio: float = 0.15,
-        seed: int = 42,
-        use_preprocessed: bool = False,
-        preprocessed_dir: str = "preprocessed_clips",
-    ):
-        """
-        Args:
-            dataset_dir: Path to "Olympic Boxing Punch Classification Video Dataset" folder
-            split: One of "train", "val", or "test"
-            image_processor: HuggingFace image processor for VideoMAE
-            train_ratio: Proportion of data for training (default 0.7)
-            val_ratio: Proportion of data for validation (default 0.15)
-            seed: Random seed for reproducible splits
-            use_preprocessed: If True, load from preprocessed numpy arrays instead of decoding videos
-            preprocessed_dir: Directory containing preprocessed clips (default "preprocessed_clips")
-        """
-        self.items: List[Dict[str, Any]] = []
-        self.image_processor = image_processor
-        self.use_preprocessed = use_preprocessed
-        self.preprocessed_dir = preprocessed_dir
-
-        # Parse all task folders
-        all_samples = []
-        task_folders = sorted([d for d in os.listdir(dataset_dir) if d.startswith('task_')])
-
-        for task_folder in task_folders:
-            task_path = os.path.join(dataset_dir, task_folder)
-            annotations_file = os.path.join(task_path, "annotations.json")
-            data_folder = os.path.join(task_path, "data")
-
-            if not os.path.exists(annotations_file):
-                continue
-
-            # Find the video file in data folder
-            video_files = [f for f in os.listdir(data_folder) if f.endswith('.mp4')]
-            if len(video_files) == 0:
-                continue
-            video_path = os.path.join(data_folder, video_files[0])
-
-            # Parse annotations
-            with open(annotations_file, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            # Extract tracks (each track is a labeled punch clip)
-            if len(data) > 0 and 'tracks' in data[0]:
-                tracks = data[0]['tracks']
-
-                for track in tracks:
-                    label_polish = track.get('label', '')
-
-                    # Convert Polish label to English code
-                    if label_polish not in POLISH_TO_ENGLISH:
-                        print(f"Warning: Unknown label '{label_polish}' in {task_folder}, skipping")
-                        continue
-
-                    label_english = POLISH_TO_ENGLISH[label_polish]
-                    label_id = LABEL2ID[label_english]
-
-                    # Extract frame range from shapes
-                    shapes = track.get('shapes', [])
-                    if not shapes:
-                        continue
-
-                    frames = [s['frame'] for s in shapes if 'frame' in s and not s.get('outside', False)]
-                    if not frames:
-                        continue
-
-                    start_frame = min(frames)
-                    end_frame = max(frames)
-
-                    all_samples.append({
-                        'video_path': video_path,
-                        'label_id': label_id,
-                        'label_name': label_english,
-                        'start_frame': start_frame,
-                        'end_frame': end_frame,
-                        'task_folder': task_folder,
-                    })
-
-        # Split data into train/val/test
-        np.random.seed(seed)
-        indices = np.random.permutation(len(all_samples))
-
-        n_train = int(len(all_samples) * train_ratio)
-        n_val = int(len(all_samples) * val_ratio)
-
-        if split == "train":
-            selected_indices = indices[:n_train]
-        elif split == "val":
-            selected_indices = indices[n_train:n_train + n_val]
-        elif split == "test":
-            selected_indices = indices[n_train + n_val:]
+    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+    std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+    
+    train_paths = []
+    val_paths = []
+    test_paths = []
+    for label in os.listdir("preprocessed_clips/train/"):
+        paths = (lambda x: [f"preprocessed_clips/train/{x}/{p}" 
+                        for p in os.listdir(f"preprocessed_clips/train/{x}")])(label)
+        paths_count = len(paths)
+        train_ind = math.floor(paths_count * 0.8)
+        val_ind = train_ind + math.floor(paths_count * 0.1)
+        test_ind = val_ind + math.floor(paths_count * 0.1)
+        train_paths.extend(paths[:train_ind])
+        val_paths.extend(paths[train_ind:val_ind])
+        test_paths.extend(paths[val_ind:])
+        
+    def __init__(self, split: str):
+        self.split = split
+        
+        
+    def __len__(self):
+        if self.split == "train":
+            return len(self.train_paths)
+        elif self.split == "val":
+            return len(self.val_paths)
+        elif self.split == "test":
+            return len(self.test_paths)
         else:
-            raise ValueError(f"Invalid split: {split}")
+            raise ValueError(f"Unknown split: {self.split}")
 
-        # Add preprocessed clip paths to each sample
-        selected_samples = [all_samples[i] for i in selected_indices]
-        for idx, sample in enumerate(selected_samples):
-            # Preprocessed clips are organized as: {split}/{label}/{clip_id}.npy
-            label_id = sample['label_id']
-            clip_filename = f"clip_{idx:05d}.npy"
-            preprocessed_path = os.path.join(preprocessed_dir, split, str(label_id), clip_filename)
-            sample['preprocessed_path'] = preprocessed_path
-
-        self.items = selected_samples
-
-        if len(self.items) == 0:
-            raise RuntimeError(f"No samples found for split={split}")
-
-        print(f"Loaded {len(self.items)} samples for {split} split")
-
-        # Print label distribution
-        label_counts = {}
-        for item in self.items:
-            label = item['label_name']
-            label_counts[label] = label_counts.get(label, 0) + 1
-        print(f"Label distribution for {split}: {label_counts}")
-
-    def __len__(self) -> int:
-        return len(self.items)
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        entry = self.items[idx]
-        label_id = entry['label_id']
-
-        if self.use_preprocessed:
-            # FAST PATH: Load preprocessed numpy array
-            preprocessed_path = entry['preprocessed_path']
-
-            if not os.path.exists(preprocessed_path):
-                raise FileNotFoundError(
-                    f"Preprocessed clip not found: {preprocessed_path}\n"
-                    f"Please run preprocess_clips.py first to generate preprocessed clips."
-                )
-
-            # Load preprocessed clip (NUM_FRAMES, H, W, 3) in uint8
-            clip_frames = np.load(preprocessed_path)  # (16, 224, 224, 3)
-
-            # Apply only normalization (resize + crop already done during preprocessing)
-            # The image_processor expects a list of PIL Images or numpy arrays
-            processed = self.image_processor(
-                list(clip_frames),  # sequence of frames
-                return_tensors="pt",
-                do_resize=False,  # Already resized during preprocessing
-                do_center_crop=False,  # Already cropped during preprocessing
-            )
-            pixel_values = processed["pixel_values"].squeeze(0)  # drop batch dim
-
+    def __getitem__(self, idx):
+        if self.split == "train":
+            path = self.train_paths[idx]
+        elif self.split == "val":
+            path = self.val_paths[idx]
+        elif self.split == "test":
+            path = self.test_paths[idx]
         else:
-            # SLOW PATH: On-demand video decoding (original behavior)
-            video_path = entry['video_path']
-            start_frame = entry['start_frame']
-            end_frame = entry['end_frame']
-
-            # 1) Decode only the required frame range (MEMORY EFFICIENT!)
-            clip_frames = read_video_frames_selective(
-                video_path, start_frame, end_frame
-            )  # (num_frames, H, W, 3), uint8
-
-            # 2) Uniform temporal subsampling to NUM_FRAMES
-            T = clip_frames.shape[0]
-            indices = uniform_sample_indices(T, NUM_FRAMES)
-            clip_frames = clip_frames[indices]  # (NUM_FRAMES, H, W, 3)
-
-            # 3) HF VideoMAE preprocessing: resize, center-crop, rescale, ImageNet norm
-            processed = self.image_processor(
-                list(clip_frames),  # sequence of frames
-                return_tensors="pt",
-            )
-            pixel_values = processed["pixel_values"].squeeze(0)  # drop batch dim
-
+            raise ValueError(f"Unknown split: {self.split}")
+        
+        clip = np.load(path)
+        
+        # convert to float and scale to 0-1
+        clip = clip.astype(np.float32) / 255.0
+        
+        # image net mean/std
+        clip = (clip - self.mean) / self.std
+        
+        #reorder to (T,C,H,W)
+        clip = clip.transpose(0,3,1,2)
+        
+        #convert to tensor
+        clip = torch.from_numpy(clip)
+        
         return {
-            "pixel_values": pixel_values,
-            "labels": label_id,
+            "pixel_values": clip,
+            "labels": torch.tensor(LABEL2ID[path.split("/")[-2]], dtype=torch.long) 
         }
+  
+       
 
 
 # -------------------------
@@ -357,9 +220,31 @@ f1_metric = evaluate.load("f1")
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
+
+    # Overall metrics
     acc = accuracy_metric.compute(predictions=preds, references=labels)["accuracy"]
     f1 = f1_metric.compute(predictions=preds, references=labels, average="macro")["f1"]
-    return {"accuracy": acc, "macro_f1": f1}
+
+    # Per-class metrics
+    report = classification_report(
+        labels, preds,
+        target_names=list(LABEL2ID.keys()),
+        output_dict=True,
+        zero_division=0
+    )
+
+    # Add per-class F1 to metrics
+    per_class_metrics = {}
+    for label_name in LABEL2ID.keys():
+        per_class_metrics[f"f1_{label_name}"] = report[label_name]["f1-score"]
+        per_class_metrics[f"precision_{label_name}"] = report[label_name]["precision"]
+        per_class_metrics[f"recall_{label_name}"] = report[label_name]["recall"]
+
+    return {
+        "accuracy": acc,
+        "macro_f1": f1,
+        **per_class_metrics
+    }
 
 
 # -------------------------
