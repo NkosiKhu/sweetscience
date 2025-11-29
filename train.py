@@ -6,6 +6,8 @@ from typing import Dict, List, Any, Tuple
 import numpy as np
 import torch
 from torch.utils.data import Dataset
+import torch.nn as nn
+
 
 import av  # pip install av
 from transformers import (
@@ -18,6 +20,8 @@ import evaluate  # pip install evaluate
 import math
 
 from sklearn.metrics import classification_report
+from sklearn.utils.class_weight import compute_class_weight
+
 
 
 # -------------------------
@@ -110,19 +114,6 @@ def read_video_frames_selective(path: str, start_frame: int, end_frame: int) -> 
     return np.stack(frames)  # (num_frames, H, W, 3)
 
 
-def uniform_sample_indices(num_total: int, num_target: int) -> np.ndarray:
-    """
-    Uniformly sample num_target indices from [0, num_total-1].
-    If num_total < num_target, we pad by repeating the last frame.
-    """
-    if num_total >= num_target:
-        indices = np.linspace(0, num_total - 1, num=num_target, dtype=np.int64)
-    else:
-        # upsample: linearly spaced indices then clip to last frame
-        indices = np.linspace(0, num_total - 1, num=num_target, dtype=np.float32)
-        indices = np.clip(indices, 0, num_total - 1).astype(np.int64)
-    return indices
-
 
 # -------------------------
 # 3. BoxingDataset — reads from Olympic Boxing dataset structure
@@ -190,7 +181,32 @@ class BoxingDataset(Dataset):
         }
   
        
+train_labels = [LABEL2ID[path.split("/")[-2]] for path in BoxingDataset.train_paths]
 
+class_weights = compute_class_weight(
+    class_weight='balanced',
+    classes=np.arange(len(LABEL2ID)),
+    y=np.array(train_labels)  # Ensure it's a numpy array
+)
+class_weights = torch.tensor(class_weights, dtype=torch.float32)
+
+class WeightedLossTrainer(Trainer):
+    def __init__(self, *args, class_weights=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.class_weights = class_weights
+
+    def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
+        labels = inputs.pop("labels")
+        outputs = model(**inputs)
+        logits = outputs.logits
+
+        # Use weighted cross-entropy
+        loss_fct = nn.CrossEntropyLoss(
+            weight=self.class_weights.to(logits.device) if self.class_weights is not None else None
+        )
+        loss = loss_fct(logits, labels)
+
+        return (loss, outputs) if return_outputs else loss
 
 # -------------------------
 # 4. Data collator for video classification
