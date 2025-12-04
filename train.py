@@ -190,10 +190,24 @@ class_weights = compute_class_weight(
 )
 class_weights = torch.tensor(class_weights, dtype=torch.float32)
 
+def has_length(dataset):
+    """
+    Checks if the dataset implements __len__() and it doesn't raise an error
+    """
+    try:
+        return len(dataset) is not None
+    except TypeError:
+        # TypeError: len() of unsized object
+        return False
+    except AttributeError:
+        # Ray DataSets raises an AttributeError: https://github.com/ray-project/ray/blob/master/python/ray/data/dataset.py#L5616
+        return False
+
 class WeightedLossTrainer(Trainer):
-    def __init__(self, *args, class_weights=None, **kwargs):
+    def __init__(self, *args, class_weights=None, train_sampler=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
+        self.train_sampler = train_sampler
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         labels = inputs.pop("labels")
@@ -207,6 +221,27 @@ class WeightedLossTrainer(Trainer):
         loss = loss_fct(logits, labels)
 
         return (loss, outputs) if return_outputs else loss
+    
+    def _get_train_sampler(self, train_dataset: Dataset | None = None):
+        if train_dataset is None:
+            train_dataset = self.train_dataset
+            
+        if train_dataset is None or not has_length(train_dataset):
+            return None
+        
+        if self.train_sampler is not None:
+            return self.train_sampler
+        
+        return super()._get_train_sampler(train_dataset)
+
+
+
+sample_weights = [class_weights[label] for label in train_labels]
+sampler = torch.utils.data.WeightedRandomSampler(
+    sample_weights,                                              
+    len(sample_weights), 
+    replacement=True
+)
 
 # -------------------------
 # 4. Data collator for video classification
