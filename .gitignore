@@ -6,5 +6,6 @@ __pycache__/
 *.md
 *.zip
 *.mp4
+*.npy
 
 .env

@@ -119,76 +119,76 @@ def read_video_frames_selective(path: str, start_frame: int, end_frame: int) -> 
 # 3. BoxingDataset — reads from Olympic Boxing dataset structure
 # -------------------------
 
-class BoxingDataset(Dataset):
-    mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
-    std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
+# class BoxingDataset(Dataset):
+#     mean = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+#     std  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
     
-    train_paths = []
-    val_paths = []
-    test_paths = []
-    for label in os.listdir("preprocessed_clips/train/"):
-        paths = (lambda x: [f"preprocessed_clips/train/{x}/{p}" 
-                        for p in os.listdir(f"preprocessed_clips/train/{x}")])(label)
-        paths_count = len(paths)
-        train_ind = math.floor(paths_count * 0.8)
-        val_ind = train_ind + math.floor(paths_count * 0.1)
-        test_ind = val_ind + math.floor(paths_count * 0.1)
-        train_paths.extend(paths[:train_ind])
-        val_paths.extend(paths[train_ind:val_ind])
-        test_paths.extend(paths[val_ind:])
+#     train_paths = []
+#     val_paths = []
+#     test_paths = []
+#     for label in os.listdir("preprocessed_clips/train/"):
+#         paths = (lambda x: [f"preprocessed_clips/train/{x}/{p}" 
+#                         for p in os.listdir(f"preprocessed_clips/train/{x}")])(label)
+#         paths_count = len(paths)
+#         train_ind = math.floor(paths_count * 0.8)
+#         val_ind = train_ind + math.floor(paths_count * 0.1)
+#         test_ind = val_ind + math.floor(paths_count * 0.1)
+#         train_paths.extend(paths[:train_ind])
+#         val_paths.extend(paths[train_ind:val_ind])
+#         test_paths.extend(paths[val_ind:])
         
-    def __init__(self, split: str):
-        self.split = split
+#     def __init__(self, split: str):
+#         self.split = split
         
         
-    def __len__(self):
-        if self.split == "train":
-            return len(self.train_paths)
-        elif self.split == "val":
-            return len(self.val_paths)
-        elif self.split == "test":
-            return len(self.test_paths)
-        else:
-            raise ValueError(f"Unknown split: {self.split}")
+#     def __len__(self):
+#         if self.split == "train":
+#             return len(self.train_paths)
+#         elif self.split == "val":
+#             return len(self.val_paths)
+#         elif self.split == "test":
+#             return len(self.test_paths)
+#         else:
+#             raise ValueError(f"Unknown split: {self.split}")
 
-    def __getitem__(self, idx):
-        if self.split == "train":
-            path = self.train_paths[idx]
-        elif self.split == "val":
-            path = self.val_paths[idx]
-        elif self.split == "test":
-            path = self.test_paths[idx]
-        else:
-            raise ValueError(f"Unknown split: {self.split}")
+#     def __getitem__(self, idx):
+#         if self.split == "train":
+#             path = self.train_paths[idx]
+#         elif self.split == "val":
+#             path = self.val_paths[idx]
+#         elif self.split == "test":
+#             path = self.test_paths[idx]
+#         else:
+#             raise ValueError(f"Unknown split: {self.split}")
         
-        clip = np.load(path)
+#         clip = np.load(path)
         
-        # convert to float and scale to 0-1
-        clip = clip.astype(np.float32) / 255.0
+#         # convert to float and scale to 0-1
+#         clip = clip.astype(np.float32) / 255.0
         
-        # image net mean/std
-        clip = (clip - self.mean) / self.std
+#         # image net mean/std
+#         clip = (clip - self.mean) / self.std
         
-        #reorder to (T,C,H,W)
-        clip = clip.transpose(0,3,1,2)
+#         #reorder to (T,C,H,W)
+#         clip = clip.transpose(0,3,1,2)
         
-        #convert to tensor
-        clip = torch.from_numpy(clip)
+#         #convert to tensor
+#         clip = torch.from_numpy(clip)
         
-        return {
-            "pixel_values": clip,
-            "labels": torch.tensor(LABEL2ID[path.split("/")[-2]], dtype=torch.long) 
-        }
+#         return {
+#             "pixel_values": clip,
+#             "labels": torch.tensor(LABEL2ID[path.split("/")[-2]], dtype=torch.long) 
+#         }
   
        
-train_labels = [LABEL2ID[path.split("/")[-2]] for path in BoxingDataset.train_paths]
+# train_labels = [LABEL2ID[path.split("/")[-2]] for path in BoxingDataset.train_paths]
 
-class_weights = compute_class_weight(
-    class_weight='balanced',
-    classes=np.arange(len(LABEL2ID)),
-    y=np.array(train_labels)  # Ensure it's a numpy array
-)
-class_weights = torch.tensor(class_weights, dtype=torch.float32)
+# class_weights = compute_class_weight(
+#     class_weight='balanced',
+#     classes=np.arange(len(LABEL2ID)),
+#     y=np.array(train_labels)  # Ensure it's a numpy array
+# )
+# class_weights = torch.tensor(class_weights, dtype=torch.float32)
 
 def has_length(dataset):
     """
@@ -236,12 +236,12 @@ class WeightedLossTrainer(Trainer):
 
 
 
-sample_weights = [class_weights[label] for label in train_labels]
-sampler = torch.utils.data.WeightedRandomSampler(
-    sample_weights,                                              
-    len(sample_weights), 
-    replacement=True
-)
+# sample_weights = [class_weights[label] for label in train_labels]
+# sampler = torch.utils.data.WeightedRandomSampler(
+#     sample_weights,                                              
+#     len(sample_weights), 
+#     replacement=True
+# )
 
 # -------------------------
 # 4. Data collator for video classification
@@ -302,78 +302,78 @@ def compute_metrics(eval_pred):
 # 6. Main: load model, datasets, and train
 # -------------------------
 
-def main():
-    # Point this at the Olympic Boxing dataset directory
-    DATASET_DIR = "Olympic Boxing Punch Classification Video Dataset"
+# def main():
+#     # Point this at the Olympic Boxing dataset directory
+#     DATASET_DIR = "Olympic Boxing Punch Classification Video Dataset"
 
-    # Pretrained VideoMAE base (self-supervised on K400)
-    model_name = "MCG-NJU/videomae-base"
+#     # Pretrained VideoMAE base (self-supervised on K400)
+#     model_name = "MCG-NJU/videomae-base"
 
-    image_processor = AutoImageProcessor.from_pretrained(model_name)
-    model = VideoMAEForVideoClassification.from_pretrained(
-        model_name,
-        num_labels=len(LABEL2ID),
-        label2id=LABEL2ID,
-        id2label=ID2LABEL,
-    )
+#     image_processor = AutoImageProcessor.from_pretrained(model_name)
+#     model = VideoMAEForVideoClassification.from_pretrained(
+#         model_name,
+#         num_labels=len(LABEL2ID),
+#         label2id=LABEL2ID,
+#         id2label=ID2LABEL,
+#     )
 
-    # FACTS used batch_size=4, grad_accum=2, warmup_ratio=0.1, epochs=10
-    # Learning rate is not rendered in the HTML; start with 1e-4 and tune around it.
-    training_args = TrainingArguments(
-        output_dir="./facts-boxing-videomae",
-        evaluation_strategy="steps",
-        eval_steps=500,
-        save_steps=500,
-        logging_steps=100,
-        save_total_limit=2,
-        num_train_epochs=10,
-        per_device_train_batch_size=4,
-        per_device_eval_batch_size=4,
-        gradient_accumulation_steps=2,  # effective batch size 8
-        warmup_ratio=0.1,
-        learning_rate=1e-4,
-        weight_decay=0.05,
-        fp16=True,
-        load_best_model_at_end=True,
-        metric_for_best_model="accuracy",
-        greater_is_better=True,
-        report_to="none",  # or "wandb"/"tensorboard"
-    )
+#     # FACTS used batch_size=4, grad_accum=2, warmup_ratio=0.1, epochs=10
+#     # Learning rate is not rendered in the HTML; start with 1e-4 and tune around it.
+#     training_args = TrainingArguments(
+#         output_dir="./facts-boxing-videomae",
+#         evaluation_strategy="steps",
+#         eval_steps=500,
+#         save_steps=500,
+#         logging_steps=100,
+#         save_total_limit=2,
+#         num_train_epochs=10,
+#         per_device_train_batch_size=4,
+#         per_device_eval_batch_size=4,
+#         gradient_accumulation_steps=2,  # effective batch size 8
+#         warmup_ratio=0.1,
+#         learning_rate=1e-4,
+#         weight_decay=0.05,
+#         fp16=True,
+#         load_best_model_at_end=True,
+#         metric_for_best_model="accuracy",
+#         greater_is_better=True,
+#         report_to="none",  # or "wandb"/"tensorboard"
+#     )
 
-    train_dataset = BoxingDataset(
-        dataset_dir=DATASET_DIR,
-        split="train",
-        image_processor=image_processor,
-    )
-    val_dataset = BoxingDataset(
-        dataset_dir=DATASET_DIR,
-        split="val",
-        image_processor=image_processor,
-    )
-    test_dataset = BoxingDataset(
-        dataset_dir=DATASET_DIR,
-        split="test",
-        image_processor=image_processor,
-    )
+#     train_dataset = BoxingDataset(
+#         dataset_dir=DATASET_DIR,
+#         split="train",
+#         image_processor=image_processor,
+#     )
+#     val_dataset = BoxingDataset(
+#         dataset_dir=DATASET_DIR,
+#         split="val",
+#         image_processor=image_processor,
+#     )
+#     test_dataset = BoxingDataset(
+#         dataset_dir=DATASET_DIR,
+#         split="test",
+#         image_processor=image_processor,
+#     )
 
-    data_collator = VideoDataCollator()
+#     data_collator = VideoDataCollator()
 
-    trainer = Trainer(
-        model=model,
-        args=training_args,
-        train_dataset=train_dataset,
-        eval_dataset=val_dataset,
-        data_collator=data_collator,
-        compute_metrics=compute_metrics,
-    )
+#     trainer = Trainer(
+#         model=model,
+#         args=training_args,
+#         train_dataset=train_dataset,
+#         eval_dataset=val_dataset,
+#         data_collator=data_collator,
+#         compute_metrics=compute_metrics,
+#     )
 
-    # Train
-    trainer.train()
+#     # Train
+#     trainer.train()
 
-    # Evaluate on test split
-    test_metrics = trainer.evaluate(test_dataset)
-    print("Test metrics:", test_metrics)
+#     # Evaluate on test split
+#     test_metrics = trainer.evaluate(test_dataset)
+#     print("Test metrics:", test_metrics)
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
